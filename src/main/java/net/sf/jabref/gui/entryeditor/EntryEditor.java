@@ -102,6 +102,8 @@ import net.sf.jabref.importer.ParserResult;
 import net.sf.jabref.importer.fileformat.BibtexParser;
 import net.sf.jabref.logic.TypedBibEntry;
 import net.sf.jabref.logic.autocompleter.AutoCompleter;
+import net.sf.jabref.logic.integrity.IntegrityCheck;
+import net.sf.jabref.logic.integrity.IntegrityMessage;
 import net.sf.jabref.logic.l10n.Localization;
 import net.sf.jabref.logic.labelpattern.LabelPatternUtil;
 import net.sf.jabref.logic.search.SearchQueryHighlightListener;
@@ -1059,14 +1061,26 @@ public class EntryEditor extends JPanel implements VetoableChangeListener, Entry
 
         @Override
         public void actionPerformed(ActionEvent e) {
-            if (tabbed.getSelectedComponent() == srcPanel) {
-                updateField(source);
-                if (lastSourceAccepted) {
+            List<IntegrityMessage> messages = new IntegrityCheck().checkBibtexEntry(entry);
+
+            if (messages.isEmpty()) {
+                if (tabbed.getSelectedComponent() == srcPanel) {
+                    updateField(source);
+                    if (lastSourceAccepted) {
+                        panel.entryEditorClosing(EntryEditor.this);
+                    }
+                } else {
                     panel.entryEditorClosing(EntryEditor.this);
                 }
+
             } else {
-                panel.entryEditorClosing(EntryEditor.this);
+                // avisa que existe erro nas entradas.
+                System.out.println(messages);
+                JOptionPane.showMessageDialog(panel,
+                        Localization.lang(messages.get(0).getFieldName() + ": " + messages.get(0).getMessage()));
+
             }
+
         }
     }
 

@@ -20,10 +20,15 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.UnsupportedCharsetException;
+import java.util.List;
 
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
 import javax.swing.JTextArea;
+import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 
 import net.sf.jabref.Globals;
@@ -36,6 +41,8 @@ import net.sf.jabref.gui.JabRefFrame;
 import net.sf.jabref.gui.worker.AbstractWorker;
 import net.sf.jabref.gui.worker.CallBack;
 import net.sf.jabref.gui.worker.Worker;
+import net.sf.jabref.logic.integrity.IntegrityCheck;
+import net.sf.jabref.logic.integrity.IntegrityMessage;
 import net.sf.jabref.logic.l10n.Encodings;
 import net.sf.jabref.logic.l10n.Localization;
 import net.sf.jabref.logic.util.io.FileBasedLock;
@@ -106,163 +113,215 @@ public class SaveDatabaseAction extends AbstractWorker {
 
     @Override
     public void run() {
-        if (canceled || (panel.getBibDatabaseContext().getDatabaseFile() == null)) {
-            return;
-        }
 
-        try {
-
-            // Make sure the current edit is stored:
-            panel.storeCurrentEdit();
-
-            // If the option is set, autogenerate keys for all entries that are
-            // lacking keys, before saving:
-            panel.autoGenerateKeysBeforeSaving();
-
-            if (FileBasedLock.waitForFileLock(panel.getBibDatabaseContext().getDatabaseFile(), 10)) {
-                // Check for external modifications to alleviate multiuser concurrency issue when near
-                // simultaneous saves occur to a shared database file: if true, do not perform the save
-                // rather return instead.
-                if (checkExternalModification()) {
-                    return;
-                }
-
-                // Save the database:
-                success = saveDatabase(panel.getBibDatabaseContext().getDatabaseFile(), false, panel.getEncoding());
-
-                Globals.fileUpdateMonitor.updateTimeStamp(panel.getFileMonitorHandle());
-            } else {
-                // No file lock
-                success = false;
-                fileLockedError = true;
-            }
-            panel.setSaving(false);
-            if (success) {
-                panel.undoManager.markUnchanged();
-
-                if (!AutoSaveManager.deleteAutoSaveFile(panel)) {
-                    //System.out.println("Deletion of autosave file failed");
-                } /* else
-                     System.out.println("Deleted autosave file (if it existed)");*/
-                // (Only) after a successful save the following
-                // statement marks that the base is unchanged
-                // since last save:
-                panel.setNonUndoableChange(false);
-                panel.setBaseChanged(false);
-                panel.setUpdatedExternally(false);
-            }
-        } catch (SaveException ex2) {
-            if (ex2 == SaveException.FILE_LOCKED) {
-                success = false;
-                fileLockedError = true;
+            if (canceled || (panel.getBibDatabaseContext().getDatabaseFile() == null)) {
                 return;
             }
-            LOGGER.error("Problem saving file", ex2);
-        }
+
+            try {
+
+                // Make sure the current edit is stored:
+                panel.storeCurrentEdit();
+
+                // If the option is set, autogenerate keys for all entries that are
+                // lacking keys, before saving:
+                panel.autoGenerateKeysBeforeSaving();
+
+                if (FileBasedLock.waitForFileLock(panel.getBibDatabaseContext().getDatabaseFile(), 10)) {
+                    // Check for external modifications to alleviate multiuser concurrency issue when near
+                    // simultaneous saves occur to a shared database file: if true, do not perform the save
+                    // rather return instead.
+                    if (checkExternalModification()) {
+                        return;
+                    }
+
+                    // Save the database:
+                    success = saveDatabase(panel.getBibDatabaseContext().getDatabaseFile(), false, panel.getEncoding());
+
+                    Globals.fileUpdateMonitor.updateTimeStamp(panel.getFileMonitorHandle());
+                } else {
+                    // No file lock
+                    success = false;
+                    fileLockedError = true;
+                }
+                panel.setSaving(false);
+                if (success) {
+                    panel.undoManager.markUnchanged();
+
+                    if (!AutoSaveManager.deleteAutoSaveFile(panel)) {
+                        //System.out.println("Deletion of autosave file failed");
+                    } /* else
+                         System.out.println("Deleted autosave file (if it existed)");*/
+                    // (Only) after a successful save the following
+                    // statement marks that the base is unchanged
+                    // since last save:
+                    panel.setNonUndoableChange(false);
+                    panel.setBaseChanged(false);
+                    panel.setUpdatedExternally(false);
+                }
+            } catch (SaveException ex2) {
+                if (ex2 == SaveException.FILE_LOCKED) {
+                    success = false;
+                    fileLockedError = true;
+                    return;
+                }
+                LOGGER.error("Problem saving file", ex2);
+            }
+
+
     }
 
     private boolean saveDatabase(File file, boolean selectedOnly, Charset encoding) throws SaveException {
-        SaveSession session;
-        frame.block();
-        try {
-            SavePreferences prefs = SavePreferences.loadForSaveFromPreferences(Globals.prefs).withEncoding(encoding);
-            BibDatabaseWriter databaseWriter = new BibDatabaseWriter();
-            if (selectedOnly) {
-                session = databaseWriter.savePartOfDatabase(panel.getBibDatabaseContext(), prefs,
-                        panel.getSelectedEntries());
+        IntegrityCheck check = new IntegrityCheck(panel.getBibDatabaseContext());
+        List<IntegrityMessage> messages = check.checkBibtexDatabase();
 
-            } else {
-                session = databaseWriter.saveDatabase(panel.getBibDatabaseContext(), prefs);
+        if(messages.isEmpty()) {
 
-            }
-            panel.registerUndoableChanges(session);
 
-        } catch (UnsupportedCharsetException ex2) {
-            JOptionPane.showMessageDialog(frame, Localization.lang("Could not save file.") +
-                            Localization.lang("Character encoding '%0' is not supported.", encoding.displayName()),
-                    Localization.lang("Save database"), JOptionPane.ERROR_MESSAGE);
-            throw new SaveException("rt");
-        } catch (SaveException ex) {
-            if (ex == SaveException.FILE_LOCKED) {
-                throw ex;
-            }
-            if (ex.specificEntry()) {
-                // Error occured during processing of
-                // be. Highlight it:
-                int row = panel.mainTable.findEntry(ex.getEntry());
-                int topShow = Math.max(0, row - 3);
-                panel.mainTable.setRowSelectionInterval(row, row);
-                panel.mainTable.scrollTo(topShow);
-                panel.showEntry(ex.getEntry());
-            } else {
-                LOGGER.error("Problem saving file", ex);
-            }
+            SaveSession session;
+            frame.block();
+            try {
+                SavePreferences prefs = SavePreferences.loadForSaveFromPreferences(Globals.prefs)
+                        .withEncoding(encoding);
+                BibDatabaseWriter databaseWriter = new BibDatabaseWriter();
+                if (selectedOnly) {
+                    session = databaseWriter.savePartOfDatabase(panel.getBibDatabaseContext(), prefs,
+                            panel.getSelectedEntries());
 
-            JOptionPane.showMessageDialog
-                    (frame, Localization.lang("Could not save file.")
-                            + ".\n" + ex.getMessage(),
-                            Localization.lang("Save database"),
-                            JOptionPane.ERROR_MESSAGE);
-            throw new SaveException("rt");
-
-        } finally {
-            frame.unblock();
-        }
-
-        boolean commit = true;
-        if (!session.getWriter().couldEncodeAll()) {
-            FormBuilder builder = FormBuilder.create().layout(new FormLayout("left:pref, 4dlu, fill:pref", "pref, 4dlu, pref"));
-            JTextArea ta = new JTextArea(session.getWriter().getProblemCharacters());
-            ta.setEditable(false);
-            builder.add(Localization.lang("The chosen encoding '%0' could not encode the following characters:",
-                    session.getEncoding().displayName())).xy(1, 1);
-            builder.add(ta).xy(3, 1);
-            builder.add(Localization.lang("What do you want to do?")).xy(1, 3);
-            String tryDiff = Localization.lang("Try different encoding");
-            int answer = JOptionPane.showOptionDialog(frame, builder.getPanel(), Localization.lang("Save database"),
-                    JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE, null,
-                    new String[] {Localization.lang("Save"), tryDiff,
-                            Localization.lang("Cancel")}, tryDiff);
-
-            if (answer == JOptionPane.NO_OPTION) {
-                // The user wants to use another encoding.
-                Object choice = JOptionPane.showInputDialog(frame, Localization.lang("Select encoding"),
-                        Localization.lang("Save database"), JOptionPane.QUESTION_MESSAGE, null,
-                        Encodings.ENCODINGS_DISPLAYNAMES, encoding);
-                if (choice == null) {
-                    commit = false;
                 } else {
-                    Charset newEncoding = Charset.forName((String) choice);
-                    return saveDatabase(file, selectedOnly, newEncoding);
+                    session = databaseWriter.saveDatabase(panel.getBibDatabaseContext(), prefs);
+
                 }
-            } else if (answer == JOptionPane.CANCEL_OPTION) {
-                commit = false;
+                panel.registerUndoableChanges(session);
+
+            } catch (UnsupportedCharsetException ex2) {
+                JOptionPane.showMessageDialog(frame,
+                        Localization.lang("Could not save file.") + Localization
+                                .lang("Character encoding '%0' is not supported.", encoding.displayName()),
+                        Localization.lang("Save database"), JOptionPane.ERROR_MESSAGE);
+                throw new SaveException("rt");
+            } catch (SaveException ex) {
+                if (ex == SaveException.FILE_LOCKED) {
+                    throw ex;
+                }
+                if (ex.specificEntry()) {
+                    // Error occured during processing of
+                    // be. Highlight it:
+                    int row = panel.mainTable.findEntry(ex.getEntry());
+                    int topShow = Math.max(0, row - 3);
+                    panel.mainTable.setRowSelectionInterval(row, row);
+                    panel.mainTable.scrollTo(topShow);
+                    panel.showEntry(ex.getEntry());
+                } else {
+                    LOGGER.error("Problem saving file", ex);
+                }
+
+                JOptionPane.showMessageDialog(frame,
+                        Localization.lang("Could not save file.") + ".\n" + ex.getMessage(),
+                        Localization.lang("Save database"), JOptionPane.ERROR_MESSAGE);
+                throw new SaveException("rt");
+
+            } finally {
+                frame.unblock();
             }
 
+            boolean commit = true;
+            if (!session.getWriter().couldEncodeAll()) {
+                FormBuilder builder = FormBuilder.create()
+                        .layout(new FormLayout("left:pref, 4dlu, fill:pref", "pref, 4dlu, pref"));
+                JTextArea ta = new JTextArea(session.getWriter().getProblemCharacters());
+                ta.setEditable(false);
+                builder.add(Localization.lang("The chosen encoding '%0' could not encode the following characters:",
+                        session.getEncoding().displayName())).xy(1, 1);
+                builder.add(ta).xy(3, 1);
+                builder.add(Localization.lang("What do you want to do?")).xy(1, 3);
+                String tryDiff = Localization.lang("Try different encoding");
+                int answer = JOptionPane.showOptionDialog(frame, builder.getPanel(), Localization.lang("Save database"),
+                        JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE, null,
+                        new String[] {Localization.lang("Save"), tryDiff, Localization.lang("Cancel")}, tryDiff);
+
+                if (answer == JOptionPane.NO_OPTION) {
+                    // The user wants to use another encoding.
+                    Object choice = JOptionPane.showInputDialog(frame, Localization.lang("Select encoding"),
+                            Localization.lang("Save database"), JOptionPane.QUESTION_MESSAGE, null,
+                            Encodings.ENCODINGS_DISPLAYNAMES, encoding);
+                    if (choice == null) {
+                        commit = false;
+                    } else {
+                        Charset newEncoding = Charset.forName((String) choice);
+                        return saveDatabase(file, selectedOnly, newEncoding);
+                    }
+                } else if (answer == JOptionPane.CANCEL_OPTION) {
+                    commit = false;
+                }
+
+            }
+
+            try {
+                if (commit) {
+                    session.commit(file);
+                    panel.setEncoding(encoding); // Make sure to remember which encoding we used.
+                } else {
+                    session.cancel();
+                }
+            } catch (SaveException e) {
+                int ans = JOptionPane.showConfirmDialog(null,
+                        Localization.lang("Save failed during backup creation") + ". "
+                                + Localization.lang("Save without backup?"),
+                        Localization.lang("Unable to create backup"), JOptionPane.YES_NO_OPTION);
+                if (ans == JOptionPane.YES_OPTION) {
+                    session.setUseBackup(false);
+                    session.commit(file);
+                    panel.setEncoding(encoding);
+                } else {
+                    commit = false;
+                }
+            }
+
+            return commit;
+
+        } else {
+            // prepare data model
+            Object[][] model = new Object[messages.size()][3];
+            int i = 0;
+            for (IntegrityMessage message : messages) {
+                model[i][0] = message.getEntry().getCiteKey();
+                model[i][1] = message.getFieldName();
+                model[i][2] = message.getMessage();
+                i++;
+            }
+
+            // construct view
+            JTable table = new JTable(model, new Object[] {"key", "field", "message"});
+
+            table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            ListSelectionModel selectionModel = table.getSelectionModel();
+
+            selectionModel.addListSelectionListener(event -> {
+                if (!event.getValueIsAdjusting()) {
+                    String citeKey = (String) model[table.getSelectedRow()][0];
+                    String fieldName = (String) model[table.getSelectedRow()][1];
+                    panel.editEntryByKeyAndFocusField(citeKey, fieldName);
+                }
+            });
+
+            table.getColumnModel().getColumn(0).setPreferredWidth(80);
+            table.getColumnModel().getColumn(1).setPreferredWidth(30);
+            table.getColumnModel().getColumn(2).setPreferredWidth(250);
+            table.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
+            JScrollPane scrollPane = new JScrollPane(table);
+            String title = Localization.lang("%0 problem(s) found", String.valueOf(messages.size()));
+            JDialog dialog = new JDialog(new JabRefFrame(), title, false);
+            dialog.add(scrollPane);
+            dialog.setSize(600, 500);
+
+            // show view
+            dialog.setVisible(true);
+
+            return false;
         }
 
-        try {
-            if (commit) {
-                session.commit(file);
-                panel.setEncoding(encoding); // Make sure to remember which encoding we used.
-            } else {
-                session.cancel();
-            }
-        } catch (SaveException e) {
-            int ans = JOptionPane.showConfirmDialog(null, Localization.lang("Save failed during backup creation") + ". "
-                    + Localization.lang("Save without backup?"),
-                    Localization.lang("Unable to create backup"),
-                    JOptionPane.YES_NO_OPTION);
-            if (ans == JOptionPane.YES_OPTION) {
-                session.setUseBackup(false);
-                session.commit(file);
-                panel.setEncoding(encoding);
-            } else {
-                commit = false;
-            }
-        }
 
-        return commit;
     }
 
     /**

@@ -1,6 +1,7 @@
 package net.sf.jabref.logic.integrity;
 
 import java.io.File;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -30,6 +31,10 @@ public class IntegrityCheck {
         this.bibDatabaseContext = Objects.requireNonNull(bibDatabaseContext);
     }
 
+    public IntegrityCheck() {
+        this.bibDatabaseContext = null;
+    }
+
     public List<IntegrityMessage> checkBibtexDatabase() {
         List<IntegrityMessage> result = new ArrayList<>();
 
@@ -40,7 +45,7 @@ public class IntegrityCheck {
         return result;
     }
 
-    private List<IntegrityMessage> checkBibtexEntry(BibEntry entry) {
+    public List<IntegrityMessage> checkBibtexEntry(BibEntry entry) {
         List<IntegrityMessage> result = new ArrayList<>();
 
         if (entry == null) {
@@ -49,15 +54,20 @@ public class IntegrityCheck {
 
         result.addAll(new AuthorNameChecker().check(entry));
 
-        if (!bibDatabaseContext.isBiblatexMode()) {
-            result.addAll(new TitleChecker().check(entry));
+        if (bibDatabaseContext != null) {
+            result.addAll(new FileChecker(bibDatabaseContext).check(entry));
+
+            if (!bibDatabaseContext.isBiblatexMode()) {
+                result.addAll(new TitleChecker().check(entry));
+            }
         }
+
 
         result.addAll(new BracketChecker("title").check(entry));
         result.addAll(new YearChecker().check(entry));
         result.addAll(new PagesChecker().check(entry));
         result.addAll(new UrlChecker().check(entry));
-        result.addAll(new FileChecker(bibDatabaseContext).check(entry));
+
         result.addAll(new TypeChecker().check(entry));
         result.addAll(new AbbreviationChecker("journal").check(entry));
         result.addAll(new AbbreviationChecker("booktitle").check(entry));
@@ -187,6 +197,7 @@ public class IntegrityCheck {
         }
     }
 
+
     private static class BracketChecker implements Checker {
 
         private final String field;
@@ -266,6 +277,7 @@ public class IntegrityCheck {
         }
     }
 
+    // arquivo que checa a integridade da entrada Ano da bibtexentry
     private static class YearChecker implements Checker {
 
         private static final Predicate<String> CONTAINS_FOUR_DIGIT = Pattern.compile("([^0-9]|^)[0-9]{4}([^0-9]|$)").asPredicate();
@@ -276,12 +288,35 @@ public class IntegrityCheck {
         @Override
         public List<IntegrityMessage> check(BibEntry entry) {
             Optional<String> value = entry.getFieldOptional("year");
+
+            // Não permitimos datas vazias
             if (!value.isPresent()) {
-                return Collections.emptyList();
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("should contain some value"), entry, "year"));
+
             }
 
             if (!CONTAINS_FOUR_DIGIT.test(value.get().trim())) {
                 return Collections.singletonList(new IntegrityMessage(Localization.lang("should contain a four digit number"), entry, "year"));
+            }
+
+            // Novo código de verificação da data
+            /**
+             * Uma entrada Data deve ter a verificação de:
+             * - um ano válido (de acordo com o calendário da linguagem Java)
+             */
+
+            int date = Integer.parseInt(value.get().trim());
+
+            if (date > LocalDate.now().getYear()) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("shouldn't be on the future"), entry, "year"));
+            }
+
+            if (date < 1452) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("it should not be before the creation of the press"),
+                                entry, "year"));
             }
 
             return Collections.emptyList();

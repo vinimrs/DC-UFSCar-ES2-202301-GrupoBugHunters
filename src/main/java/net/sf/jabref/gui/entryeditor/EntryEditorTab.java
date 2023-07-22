@@ -320,8 +320,10 @@ class EntryEditorTab {
         return true;
     }
 
+    // método para validar em tempo de alteração os campos
     public void validateAllFields() {
         for (Map.Entry<String, FieldEditor> stringFieldEditorEntry : editors.entrySet()) {
+
             FieldEditor ed = stringFieldEditorEntry.getValue();
             ed.updateFontColor();
             ed.setEnabled(true);
@@ -329,6 +331,7 @@ class EntryEditorTab {
                 ed.setActiveBackgroundColor();
             } else {
                 ed.setValidBackgroundColor();
+
             }
         }
     }
