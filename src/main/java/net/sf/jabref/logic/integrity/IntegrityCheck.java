@@ -309,11 +309,13 @@ public class IntegrityCheck {
             // Início do novo código de verificação do ano
             int date = Integer.parseInt(value.trim());
 
+            // 1- O ano de uma entrada Bibtex não pode estar no futuro
             if (date > LocalDate.now().getYear()) {
                 return Collections.singletonList(
                         new IntegrityMessage(Localization.lang("shouldn't be on the future"), entry, "year"));
             }
 
+            // 2- O ano não pode estar "muito" no passado
             if (date < 1452) {
                 return Collections.singletonList(
                         new IntegrityMessage(Localization.lang("it should not be before the creation of the press"),
@@ -367,7 +369,7 @@ public class IntegrityCheck {
             // Não permitimos keys com menos de 2 caracteres
             if (value.length() < 2) {
                 return Collections.singletonList(new IntegrityMessage(
-                        Localization.lang("should be at least two caracters long"), entry, "bibtexkey"));
+                        Localization.lang("should be at least two characters long"), entry, "bibtexkey"));
             }
 
             // Não permitimos keys que não iniciam com uma letra
