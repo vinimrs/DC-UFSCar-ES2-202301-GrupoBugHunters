@@ -320,7 +320,6 @@ class EntryEditorTab {
         return true;
     }
 
-    // método para validar em tempo de alteração os campos
     public void validateAllFields() {
         for (Map.Entry<String, FieldEditor> stringFieldEditorEntry : editors.entrySet()) {
 

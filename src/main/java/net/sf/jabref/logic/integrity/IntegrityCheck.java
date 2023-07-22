@@ -23,6 +23,7 @@ import net.sf.jabref.model.entry.BibEntry;
 import net.sf.jabref.model.entry.FileField;
 import net.sf.jabref.model.entry.ParsedFileField;
 
+
 public class IntegrityCheck {
 
     private final BibDatabaseContext bibDatabaseContext;
@@ -67,6 +68,8 @@ public class IntegrityCheck {
         result.addAll(new YearChecker().check(entry));
         result.addAll(new PagesChecker().check(entry));
         result.addAll(new UrlChecker().check(entry));
+        // Mais uma tarefa na bateria de checagem
+        result.addAll(new BibTexKeyChecker(this.bibDatabaseContext).check(entry));
 
         result.addAll(new TypeChecker().check(entry));
         result.addAll(new AbbreviationChecker("journal").check(entry));
@@ -277,36 +280,34 @@ public class IntegrityCheck {
         }
     }
 
-    // arquivo que checa a integridade da entrada Ano da bibtexentry
+    /**
+     * Classe utilitária para checagem do campo Ano
+     *
+     * - Year: deve ser inserido somente um ano válido
+     *          (de acordo com o calendário da linguagem Java)
+     */
     private static class YearChecker implements Checker {
 
         private static final Predicate<String> CONTAINS_FOUR_DIGIT = Pattern.compile("([^0-9]|^)[0-9]{4}([^0-9]|$)").asPredicate();
 
-        /**
-         * Checks, if the number String contains a four digit year
-         */
         @Override
         public List<IntegrityMessage> check(BibEntry entry) {
-            Optional<String> value = entry.getFieldOptional("year");
+            String value = entry.getField("year");
 
-            // Não permitimos datas vazias
-            if (!value.isPresent()) {
+            // Não permitimos anos vazios
+            if (value == null) {
                 return Collections.singletonList(
                         new IntegrityMessage(Localization.lang("should contain some value"), entry, "year"));
 
             }
 
-            if (!CONTAINS_FOUR_DIGIT.test(value.get().trim())) {
+            // Não permitimos anos diferentes de 4 dígitos
+            if (!CONTAINS_FOUR_DIGIT.test(value.trim())) {
                 return Collections.singletonList(new IntegrityMessage(Localization.lang("should contain a four digit number"), entry, "year"));
             }
 
-            // Novo código de verificação da data
-            /**
-             * Uma entrada Data deve ter a verificação de:
-             * - um ano válido (de acordo com o calendário da linguagem Java)
-             */
-
-            int date = Integer.parseInt(value.get().trim());
+            // Início do novo código de verificação do ano
+            int date = Integer.parseInt(value.trim());
 
             if (date > LocalDate.now().getYear()) {
                 return Collections.singletonList(
@@ -317,6 +318,62 @@ public class IntegrityCheck {
                 return Collections.singletonList(
                         new IntegrityMessage(Localization.lang("it should not be before the creation of the press"),
                                 entry, "year"));
+            }
+
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Classe utilitária para checagem do campo bibtexkey
+     *
+     * - Bibtexkey: definido pelo usuário ou automaticamente,
+     *              deve ter no mínimo 2 caracteres,
+     *              sendo o primeiro uma letra maiúscula ou minúscula.
+     */
+    private static class BibTexKeyChecker implements Checker {
+
+        // Regex para verificação da validade da key
+        private static final Predicate<String> STARTS_WITH_LETTER = Pattern.compile("([a-zA-Z])([^\\s])").asPredicate();
+        private final BibDatabaseContext bibDatabaseContext;
+
+
+        public BibTexKeyChecker(BibDatabaseContext bibDatabaseContext) {
+            // TODO Auto-generated constructor stub
+            this.bibDatabaseContext = bibDatabaseContext;
+        }
+
+
+        @Override
+        public List<IntegrityMessage> check(BibEntry entry) {
+            String value = entry.getCiteKey();
+
+            // Verifica a duplicacao na base
+            // > 1 pois a key já vai estar mapeada automaticamente no Map<> allKeys.
+            boolean isDuplicate = bibDatabaseContext.getDatabase().getNumberOfKeyOccurrences(value) > 1;
+
+            // Não permitimos keys duplicadas
+            if (isDuplicate) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("should be unique in database"), entry, "bibtexkey"));
+            }
+
+            // Não permitimos keys vazias
+            if (value == null) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("should contains some value"), entry, "bibtexkey"));
+            }
+
+            // Não permitimos keys com menos de 2 caracteres
+            if (value.length() < 2) {
+                return Collections.singletonList(new IntegrityMessage(
+                        Localization.lang("should be at least two caracters long"), entry, "bibtexkey"));
+            }
+
+            // Não permitimos keys que não iniciam com uma letra
+            if (!STARTS_WITH_LETTER.test(value)) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("should start with letter"), entry, "bibtexkey"));
             }
 
             return Collections.emptyList();

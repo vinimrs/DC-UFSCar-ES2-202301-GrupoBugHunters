@@ -24,7 +24,6 @@ class DuplicationChecker {
     // else it will add the newkey to the to set and remove the oldkey
     public boolean checkForDuplicateKeyAndAdd(String oldKey, String newKey) {
         // LOGGER.debug(" checkForDuplicateKeyAndAdd [oldKey = " + oldKey + "] [newKey = " + newKey + "]");
-
         boolean duplicate;
         if (oldKey == null) {// this is a new entry so don't bother removing oldKey
             duplicate = addKeyToSet(newKey);

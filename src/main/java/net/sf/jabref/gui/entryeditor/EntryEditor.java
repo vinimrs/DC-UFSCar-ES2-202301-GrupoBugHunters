@@ -18,6 +18,7 @@ package net.sf.jabref.gui.entryeditor;
 import java.awt.AWTKeyStroke;
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -1061,7 +1062,7 @@ public class EntryEditor extends JPanel implements VetoableChangeListener, Entry
 
         @Override
         public void actionPerformed(ActionEvent e) {
-            List<IntegrityMessage> messages = new IntegrityCheck().checkBibtexEntry(entry);
+            List<IntegrityMessage> messages = new IntegrityCheck(panel.getBibDatabaseContext()).checkBibtexEntry(entry);
 
             if (messages.isEmpty()) {
                 if (tabbed.getSelectedComponent() == srcPanel) {
@@ -1075,10 +1076,30 @@ public class EntryEditor extends JPanel implements VetoableChangeListener, Entry
 
             } else {
                 // avisa que existe erro nas entradas.
-                System.out.println(messages);
-                JOptionPane.showMessageDialog(panel,
-                        Localization.lang(messages.get(0).getFieldName() + ": " + messages.get(0).getMessage()));
 
+                final StringBuilder dialogContent = new StringBuilder();
+                int warningCount = 1;
+                for (IntegrityMessage message : messages) {
+                    dialogContent.append(String.format("%d. %s%n", warningCount++,
+                            message.getFieldName() + ": " + message.getMessage()));
+                }
+                dialogContent.deleteCharAt(dialogContent.length() - 1);
+
+                // Generate dialog title
+                String dialogTitle = Localization.lang("Invalid input");
+
+                // Create JTextArea with JScrollPane
+                final JTextArea textArea = new JTextArea(dialogContent.toString());
+                final JScrollPane scrollPane = new JScrollPane(textArea) {
+
+                    @Override
+                    public Dimension getPreferredSize() {
+                        return new Dimension(800, Math.min(Math.max(100, messages.size() * 15), 400)); // Guess a suitable height between 100 and 400
+                    }
+                };
+
+                // Show dialog
+                JOptionPane.showMessageDialog(panel, scrollPane, dialogTitle, JOptionPane.ERROR_MESSAGE);
             }
 
         }
