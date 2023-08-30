@@ -322,6 +322,7 @@ class EntryEditorTab {
 
     public void validateAllFields() {
         for (Map.Entry<String, FieldEditor> stringFieldEditorEntry : editors.entrySet()) {
+
             FieldEditor ed = stringFieldEditorEntry.getValue();
             ed.updateFontColor();
             ed.setEnabled(true);
@@ -329,6 +330,7 @@ class EntryEditorTab {
                 ed.setActiveBackgroundColor();
             } else {
                 ed.setValidBackgroundColor();
+
             }
         }
     }

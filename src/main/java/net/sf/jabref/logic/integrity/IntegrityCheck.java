@@ -1,6 +1,7 @@
 package net.sf.jabref.logic.integrity;
 
 import java.io.File;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -22,12 +23,17 @@ import net.sf.jabref.model.entry.BibEntry;
 import net.sf.jabref.model.entry.FileField;
 import net.sf.jabref.model.entry.ParsedFileField;
 
+
 public class IntegrityCheck {
 
     private final BibDatabaseContext bibDatabaseContext;
 
     public IntegrityCheck(BibDatabaseContext bibDatabaseContext) {
         this.bibDatabaseContext = Objects.requireNonNull(bibDatabaseContext);
+    }
+
+    public IntegrityCheck() {
+        this.bibDatabaseContext = null;
     }
 
     public List<IntegrityMessage> checkBibtexDatabase() {
@@ -40,7 +46,7 @@ public class IntegrityCheck {
         return result;
     }
 
-    private List<IntegrityMessage> checkBibtexEntry(BibEntry entry) {
+    public List<IntegrityMessage> checkBibtexEntry(BibEntry entry) {
         List<IntegrityMessage> result = new ArrayList<>();
 
         if (entry == null) {
@@ -49,15 +55,22 @@ public class IntegrityCheck {
 
         result.addAll(new AuthorNameChecker().check(entry));
 
-        if (!bibDatabaseContext.isBiblatexMode()) {
-            result.addAll(new TitleChecker().check(entry));
+        if (bibDatabaseContext != null) {
+            result.addAll(new FileChecker(bibDatabaseContext).check(entry));
+
+            if (!bibDatabaseContext.isBiblatexMode()) {
+                result.addAll(new TitleChecker().check(entry));
+            }
         }
+
 
         result.addAll(new BracketChecker("title").check(entry));
         result.addAll(new YearChecker().check(entry));
         result.addAll(new PagesChecker().check(entry));
         result.addAll(new UrlChecker().check(entry));
-        result.addAll(new FileChecker(bibDatabaseContext).check(entry));
+        // Mais uma tarefa na bateria de checagem
+        result.addAll(new BibTexKeyChecker(this.bibDatabaseContext).check(entry));
+
         result.addAll(new TypeChecker().check(entry));
         result.addAll(new AbbreviationChecker("journal").check(entry));
         result.addAll(new AbbreviationChecker("booktitle").check(entry));
@@ -187,6 +200,7 @@ public class IntegrityCheck {
         }
     }
 
+
     private static class BracketChecker implements Checker {
 
         private final String field;
@@ -266,22 +280,102 @@ public class IntegrityCheck {
         }
     }
 
+    /**
+     * Classe utilitária para checagem do campo Ano
+     *
+     * - Year: deve ser inserido somente um ano válido
+     *          (de acordo com o calendário da linguagem Java)
+     */
     private static class YearChecker implements Checker {
 
         private static final Predicate<String> CONTAINS_FOUR_DIGIT = Pattern.compile("([^0-9]|^)[0-9]{4}([^0-9]|$)").asPredicate();
 
-        /**
-         * Checks, if the number String contains a four digit year
-         */
         @Override
         public List<IntegrityMessage> check(BibEntry entry) {
-            Optional<String> value = entry.getFieldOptional("year");
-            if (!value.isPresent()) {
-                return Collections.emptyList();
+            String value = entry.getField("year");
+
+            // Não permitimos anos vazios
+            if (value == null) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("should contain some value"), entry, "year"));
+
             }
 
-            if (!CONTAINS_FOUR_DIGIT.test(value.get().trim())) {
+            // Não permitimos anos diferentes de 4 dígitos
+            if (!CONTAINS_FOUR_DIGIT.test(value.trim())) {
                 return Collections.singletonList(new IntegrityMessage(Localization.lang("should contain a four digit number"), entry, "year"));
+            }
+
+            // Início do novo código de verificação do ano
+            int date = Integer.parseInt(value.trim());
+
+            // 1- O ano de uma entrada Bibtex não pode estar no futuro
+            if (date > LocalDate.now().getYear()) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("shouldn't be on the future"), entry, "year"));
+            }
+
+            // 2- O ano não pode estar "muito" no passado
+            if (date < 1452) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("it should not be before the creation of the press"),
+                                entry, "year"));
+            }
+
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Classe utilitária para checagem do campo bibtexkey
+     *
+     * - Bibtexkey: definido pelo usuário ou automaticamente,
+     *              deve ter no mínimo 2 caracteres,
+     *              sendo o primeiro uma letra maiúscula ou minúscula.
+     */
+    private static class BibTexKeyChecker implements Checker {
+
+        // Regex para verificação da validade da key
+        private static final Predicate<String> STARTS_WITH_LETTER = Pattern.compile("([a-zA-Z])([^\\s])").asPredicate();
+        private final BibDatabaseContext bibDatabaseContext;
+
+
+        public BibTexKeyChecker(BibDatabaseContext bibDatabaseContext) {
+            // TODO Auto-generated constructor stub
+            this.bibDatabaseContext = bibDatabaseContext;
+        }
+
+
+        @Override
+        public List<IntegrityMessage> check(BibEntry entry) {
+            String value = entry.getCiteKey();
+
+            // Verifica a duplicacao na base
+            // > 1 pois a key já vai estar mapeada automaticamente no Map<> allKeys.
+            boolean isDuplicate = bibDatabaseContext.getDatabase().getNumberOfKeyOccurrences(value) > 1;
+
+            // Não permitimos keys duplicadas
+            if (isDuplicate) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("should be unique in database"), entry, "bibtexkey"));
+            }
+
+            // Não permitimos keys vazias
+            if (value == null) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("should contains some value"), entry, "bibtexkey"));
+            }
+
+            // Não permitimos keys com menos de 2 caracteres
+            if (value.length() < 2) {
+                return Collections.singletonList(new IntegrityMessage(
+                        Localization.lang("should be at least two characters long"), entry, "bibtexkey"));
+            }
+
+            // Não permitimos keys que não iniciam com uma letra
+            if (!STARTS_WITH_LETTER.test(value)) {
+                return Collections.singletonList(
+                        new IntegrityMessage(Localization.lang("should start with letter"), entry, "bibtexkey"));
             }
 
             return Collections.emptyList();
