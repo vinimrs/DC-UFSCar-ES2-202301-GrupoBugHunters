@@ -16,6 +16,7 @@
 package net.sf.jabref.importer;
 
 import java.io.BufferedInputStream;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -34,6 +35,7 @@ import net.sf.jabref.Globals;
 import net.sf.jabref.importer.fileformat.BibTeXMLImporter;
 import net.sf.jabref.importer.fileformat.BiblioscapeImporter;
 import net.sf.jabref.importer.fileformat.BibtexImporter;
+import net.sf.jabref.importer.fileformat.CSVImporter; //importar arquivos csv
 import net.sf.jabref.importer.fileformat.CopacImporter;
 import net.sf.jabref.importer.fileformat.EndnoteImporter;
 import net.sf.jabref.importer.fileformat.FreeCiteImporter;
@@ -88,6 +90,7 @@ public class ImportFormatReader {
         formats.add(new RepecNepImporter());
         formats.add(new RisImporter());
         formats.add(new SilverPlatterImporter());
+        formats.add(new CSVImporter()); //adicionar a classe nova que vai importar os arquivos csv
 
         /**
          * Get custom import formats
